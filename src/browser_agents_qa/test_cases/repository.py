@@ -5,6 +5,7 @@ from uuid import UUID, uuid4
 
 from browser_agents_qa.test_cases.models import AgenticTestCase, AgenticTestCaseCreate
 
+
 class TestCaseRepository(Protocol):
     """Specify the persistence operations required by test-case workflows."""
 
