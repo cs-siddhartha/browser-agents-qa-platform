@@ -1,7 +1,7 @@
 from typing import TypedDict
 from uuid import UUID
 
-from browser_agents_qa.runs.models import RunStatus
+from browser_agents_qa.runs.models import ExecutionPlan, RunStatus
 from browser_agents_qa.test_cases.models import AgenticTestCase
 
 
@@ -12,7 +12,7 @@ class AgentExecutionState(TypedDict):
     test_case: AgenticTestCase
     status: RunStatus
     current_node: str | None
-    plan: list[str]
+    plan: ExecutionPlan | None
     observations: list[str]
     evidence: list[dict[str, object]]
     errors: list[str]

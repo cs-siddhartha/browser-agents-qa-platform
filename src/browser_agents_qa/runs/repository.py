@@ -19,6 +19,11 @@ class RunRepository(Protocol):
 
         ...
 
+    async def update(self, run: AgenticRun) -> AgenticRun:
+        """Persist and return the current state of an existing run."""
+
+        ...
+
 
 class InMemoryRunRepository:
     """Store agentic test runs in process memory."""
@@ -51,3 +56,13 @@ class InMemoryRunRepository:
             run = self._runs.get(run_id)
 
         return run.model_copy(deep=True) if run is not None else None
+
+    async def update(self, run: AgenticRun) -> AgenticRun:
+        """Persist and return the current state of an existing run."""
+
+        async with self._lock:
+            if run.id not in self._runs:
+                raise KeyError(run.id)
+            self._runs[run.id] = run.model_copy(deep=True)
+
+        return run
