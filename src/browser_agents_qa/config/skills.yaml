@@ -1,0 +1,159 @@
+verify_gateway_access:
+  version: 1
+  description: Verify that the target application can render without gateway restrictions.
+  prompt: skills/prompts/verify_gateway_access.md
+  handler: gateway.verify_access
+  layer: gateway
+  inputs:
+    domains:
+      type: list[string]
+      description: Domains that the test case permits the browser to access.
+  outputs:
+    accessible:
+      type: boolean
+      description: Whether the target application is accessible for execution.
+    block_reason:
+      type: string
+      description: CAPTCHA, login, geo, rate-limit, or network reason when blocked.
+      required: false
+  preconditions: []
+  fallbacks: []
+  retries: 1
+  cost:
+    llm_calls: 0
+    vision_calls: 0
+
+extract_page_content:
+  version: 1
+  description: Extract useful page text and metadata without browser reasoning.
+  prompt: skills/prompts/extract_page_content.md
+  handler: extraction.extract_page_content
+  layer: extraction
+  inputs:
+    objective:
+      type: string
+      description: Information the test objective needs from the current page.
+  outputs:
+    content:
+      type: string
+      description: Relevant extracted page content.
+    useful:
+      type: boolean
+      description: Whether extraction produced enough information to continue.
+  preconditions:
+    - gateway_access_verified
+  fallbacks:
+    - inspect_accessibility
+  retries: 1
+  cost:
+    llm_calls: 0
+    vision_calls: 0
+
+perform_browser_action:
+  version: 1
+  description: Perform a deterministic browser action with Playwright locators.
+  prompt: skills/prompts/perform_browser_action.md
+  handler: browser.perform_action
+  layer: playwright
+  inputs:
+    instruction:
+      type: string
+      description: The concrete browser action to perform.
+    expected_outcome:
+      type: string
+      description: The observable state expected after the action.
+  outputs:
+    completed:
+      type: boolean
+      description: Whether the deterministic browser action succeeded.
+    observation:
+      type: string
+      description: The browser state observed after the action.
+  preconditions:
+    - gateway_access_verified
+  fallbacks:
+    - inspect_accessibility
+    - inspect_vision
+  retries: 2
+  cost:
+    llm_calls: 0
+    vision_calls: 0
+
+inspect_accessibility:
+  version: 1
+  description: Identify browser targets from the accessibility tree and visible text.
+  prompt: skills/prompts/inspect_accessibility.md
+  handler: browser.inspect_accessibility
+  layer: accessibility
+  inputs:
+    instruction:
+      type: string
+      description: The action or target that deterministic selection could not resolve.
+  outputs:
+    target:
+      type: object
+      description: The accessible role, name, and locator candidate selected.
+    confidence:
+      type: number
+      description: Confidence that the selected target matches the instruction.
+  preconditions:
+    - page_rendered
+  fallbacks:
+    - inspect_vision
+  retries: 1
+  cost:
+    llm_calls: 1
+    vision_calls: 0
+
+inspect_vision:
+  version: 1
+  description: Identify an unresolved browser target from a marked screenshot.
+  prompt: skills/prompts/inspect_vision.md
+  handler: browser.inspect_vision
+  layer: vision
+  inputs:
+    instruction:
+      type: string
+      description: The action or target unresolved by cheaper interaction layers.
+  outputs:
+    mark_id:
+      type: integer
+      description: The selected set-of-marks identifier.
+    confidence:
+      type: number
+      description: Confidence that the marked target matches the instruction.
+  preconditions:
+    - page_rendered
+  fallbacks: []
+  retries: 0
+  cost:
+    llm_calls: 0
+    vision_calls: 1
+
+assert_outcome:
+  version: 1
+  description: Verify an expected test outcome against collected execution evidence.
+  prompt: skills/prompts/assert_outcome.md
+  handler: assertions.assert_outcome
+  layer: assertion
+  inputs:
+    assertion:
+      type: string
+      description: The expected outcome written in the agentic test case.
+    evidence:
+      type: list[object]
+      description: Evidence collected by previous execution skills.
+  outputs:
+    passed:
+      type: boolean
+      description: Whether the available evidence satisfies the assertion.
+    explanation:
+      type: string
+      description: Why the assertion passed or failed.
+  preconditions:
+    - execution_evidence_available
+  fallbacks: []
+  retries: 0
+  cost:
+    llm_calls: 0
+    vision_calls: 0

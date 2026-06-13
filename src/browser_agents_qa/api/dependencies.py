@@ -1,12 +1,14 @@
 from browser_agents_qa.planning.planners import DeterministicPlanner
 from browser_agents_qa.planning.workflow import PlanningWorkflow
 from browser_agents_qa.runs.repository import InMemoryRunRepository, RunRepository
+from browser_agents_qa.skills.catalogue import load_default_catalogue
 from browser_agents_qa.test_cases.repository import (
     InMemoryTestCaseRepository,
     TestCaseRepository,
 )
 
-planning_workflow = PlanningWorkflow(DeterministicPlanner())
+skill_catalogue = load_default_catalogue()
+planning_workflow = PlanningWorkflow(DeterministicPlanner(skill_catalogue))
 run_repository = InMemoryRunRepository()
 test_case_repository = InMemoryTestCaseRepository()
 

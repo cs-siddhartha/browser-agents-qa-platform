@@ -3,7 +3,8 @@ from typing import Protocol
 from langchain_core.language_models import BaseChatModel
 from langchain_core.prompts import ChatPromptTemplate
 
-from browser_agents_qa.runs.models import ExecutionLayer, ExecutionPlan, PlanStep
+from browser_agents_qa.runs.models import ExecutionPlan, PlanStep
+from browser_agents_qa.skills.catalogue import SkillCatalogue
 from browser_agents_qa.test_cases.models import AgenticTestCase
 
 
@@ -19,45 +20,82 @@ class Planner(Protocol):
 class DeterministicPlanner:
     """Create a local baseline plan without requiring an LLM provider."""
 
+    def __init__(self, catalogue: SkillCatalogue) -> None:
+        """Configure deterministic planning against validated catalogue skills."""
+
+        self._catalogue = catalogue
+
     async def create_plan(self, test_case: AgenticTestCase) -> ExecutionPlan:
         """Convert preconditions, objective, and assertions into ordered steps."""
 
+        gateway_skill = self._catalogue.get("verify_gateway_access")
+        extraction_skill = self._catalogue.get("extract_page_content")
+        browser_skill = self._catalogue.get("perform_browser_action")
+        assertion_skill = self._catalogue.get("assert_outcome")
+
         steps = [
             PlanStep(
-                instruction=f"Verify precondition: {precondition}",
-                expected_outcome="The precondition is satisfied before browser execution.",
-                preferred_layer=ExecutionLayer.EXTRACTION,
+                id="verify_gateway_access",
+                skill=gateway_skill.name,
+                instruction="Verify gateway access for the allowed test domains.",
+                arguments={"domains": test_case.constraints.allowed_domains},
+                expected_outcome="The target application is accessible for execution.",
+                preferred_layer=gateway_skill.layer,
             )
-            for precondition in test_case.preconditions
         ]
+        steps.extend(
+            PlanStep(
+                id=f"verify_precondition_{index}",
+                skill=extraction_skill.name,
+                instruction=f"Verify precondition: {precondition}",
+                arguments={"objective": precondition},
+                expected_outcome="The precondition is satisfied before browser execution.",
+                preferred_layer=extraction_skill.layer,
+                depends_on=["verify_gateway_access"],
+            )
+            for index, precondition in enumerate(test_case.preconditions, start=1)
+        )
+        browser_dependencies = [step.id for step in steps]
         steps.append(
             PlanStep(
+                id="perform_objective",
+                skill=browser_skill.name,
                 instruction=test_case.objective,
+                arguments={
+                    "instruction": test_case.objective,
+                    "expected_outcome": "The requested browser workflow is completed.",
+                },
                 expected_outcome="The requested browser workflow is completed.",
-                preferred_layer=ExecutionLayer.PLAYWRIGHT,
+                preferred_layer=browser_skill.layer,
+                depends_on=browser_dependencies,
             )
         )
         steps.extend(
             PlanStep(
+                id=f"assert_outcome_{index}",
+                skill=assertion_skill.name,
                 instruction=f"Verify assertion: {assertion}",
+                arguments={"assertion": assertion},
                 expected_outcome=assertion,
-                preferred_layer=ExecutionLayer.ASSERTION,
+                preferred_layer=assertion_skill.layer,
+                depends_on=["perform_objective"],
             )
-            for assertion in test_case.assertions
+            for index, assertion in enumerate(test_case.assertions, start=1)
         )
 
         return ExecutionPlan(
             summary=f"Execute agentic test case: {test_case.name}",
-            steps=steps[: test_case.constraints.max_steps],
+            steps=steps,
         )
 
 
 class LangChainPlanner:
     """Use a LangChain chat model to produce the platform planning schema."""
 
-    def __init__(self, model: BaseChatModel) -> None:
+    def __init__(self, model: BaseChatModel, catalogue: SkillCatalogue) -> None:
         """Configure the planner with a provider-specific LangChain chat model."""
 
+        self._catalogue = catalogue
         self._planner = (
             ChatPromptTemplate.from_messages(
                 [
@@ -74,7 +112,9 @@ class LangChainPlanner:
                         "Preconditions: {preconditions}\n"
                         "Assertions: {assertions}\n"
                         "Maximum steps: {max_steps}\n"
-                        "Allowed domains: {allowed_domains}",
+                        "Allowed domains: {allowed_domains}\n"
+                        "Available skills:\n{skills}\n"
+                        "Use only listed skill names and make dependencies explicit.",
                     ),
                 ]
             )
@@ -92,6 +132,15 @@ class LangChainPlanner:
                 "assertions": test_case.assertions,
                 "max_steps": test_case.constraints.max_steps,
                 "allowed_domains": test_case.constraints.allowed_domains,
+                "skills": self._catalogue.planner_context(),
             }
         )
-        return ExecutionPlan.model_validate(result)
+        plan = ExecutionPlan.model_validate(result)
+        for step in plan.steps:
+            skill = self._catalogue.get(step.skill)
+            if step.preferred_layer is not skill.layer:
+                raise ValueError(
+                    f"Plan step '{step.id}' uses layer '{step.preferred_layer}' "
+                    f"but skill '{step.skill}' requires '{skill.layer}'."
+                )
+        return plan

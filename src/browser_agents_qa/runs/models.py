@@ -21,6 +21,7 @@ class RunStatus(StrEnum):
 class ExecutionLayer(StrEnum):
     """Identify the preferred interaction layer for a planned step."""
 
+    GATEWAY = "gateway"
     EXTRACTION = "extraction"
     PLAYWRIGHT = "playwright"
     ACCESSIBILITY = "accessibility"
@@ -33,9 +34,13 @@ class PlanStep(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    id: str = Field(pattern=r"^[a-z][a-z0-9_]*$", max_length=100)
+    skill: str = Field(pattern=r"^[a-z][a-z0-9_]*$", max_length=100)
     instruction: str = Field(min_length=1, max_length=1_000)
+    arguments: dict[str, object] = Field(default_factory=dict)
     expected_outcome: str = Field(min_length=1, max_length=1_000)
     preferred_layer: ExecutionLayer
+    depends_on: list[str] = Field(default_factory=list, max_length=50)
 
 
 class ExecutionPlan(BaseModel):
@@ -44,7 +49,7 @@ class ExecutionPlan(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     summary: str = Field(min_length=1, max_length=1_000)
-    steps: list[PlanStep] = Field(min_length=1, max_length=200)
+    steps: list[PlanStep] = Field(min_length=1, max_length=250)
 
 
 class AgenticRunCreate(BaseModel):
